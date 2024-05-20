@@ -1,9 +1,9 @@
 # encoding:utf-8
 import json
 import threading
-
 import requests
-
+import time
+from threading import Thread, Event
 from bot.bot import Bot
 from bot.dify.dify_session import DifySession, DifySessionManager
 from bridge.context import ContextType, Context
@@ -64,22 +64,58 @@ class DifyBot(Bot):
         }
 
     def _reply(self, query: str, session: DifySession, context: Context):
-        try:
-            session.count_user_message() # 限制一个conversation中消息数，防止conversation过长
-            dify_app_type = conf().get('dify_app_type', 'chatbot')
-            if dify_app_type == 'chatbot':
-                return self._handle_chatbot(query, session)
-            elif dify_app_type == 'agent':
-                return self._handle_agent(query, session, context)
-            elif dify_app_type == 'workflow':
-                return self._handle_workflow(query, session)
-            else:
-                return None, "dify_app_type must be agent, chatbot or workflow"
+        # try:
+        #     session.count_user_message() # 限制一个conversation中消息数，防止conversation过长
+        #     dify_app_type = conf().get('dify_app_type', 'chatbot')
+        #     if dify_app_type == 'chatbot':
+        #         return self._handle_chatbot(query, session)
+        #     elif dify_app_type == 'agent':
+        #         return self._handle_agent(query, session, context)
+        #     elif dify_app_type == 'workflow':
+        #         return self._handle_workflow(query, session)
+        #     else:
+        #         return None, "dify_app_type must be agent, chatbot or workflow"
 
+        # except Exception as e:
+        #     error_info = f"[DIFY] Exception: {e}"
+        #     logger.exception(error_info)
+        #     return None, error_info
+        
+        completed = Event()
+        reply_data = None
+        error_info = None
+
+        def check_completion():
+            if not completed.wait(timeout=6):  # 等待直到标志变为True或超时6秒
+                if not completed.is_set():  # 如果处理还未完成
+                    initial_reply = Reply(ReplyType.TEXT, "🎉正在为您查询，请稍候…")
+                    context.get("channel").send(initial_reply, context)
+
+        # 启动计时线程
+        timer_thread = Thread(target=check_completion)
+        timer_thread.start()
+
+        try:
+            session.count_user_message()
+            dify_app_type = conf().get('dify_app_type', 'chatbot')
+
+            if dify_app_type == 'chatbot':
+                reply_data = self._handle_chatbot(query, session)
+            elif dify_app_type == 'agent':
+                reply_data = self._handle_agent(query, session, context)
+            elif dify_app_type == 'workflow':
+                reply_data = self._handle_workflow(query, session)
+            else:
+                reply_data = None, "dify_app_type must be agent, chatbot or workflow"
         except Exception as e:
             error_info = f"[DIFY] Exception: {e}"
             logger.exception(error_info)
-            return None, error_info
+            reply_data = None, error_info
+
+        completed.set()  # 标记处理完成
+        timer_thread.join()  # 等待计时线程结束
+
+        return reply_data
 
     def _handle_chatbot(self, query: str, session: DifySession):
         # TODO: 获取response部分抽取为公共函数
