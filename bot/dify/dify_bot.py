@@ -41,6 +41,9 @@ class DifyBot(Bot):
             reply, err = self._reply(query, session, context)
             if err != None:
                 reply = Reply(ReplyType.TEXT, "我暂时遇到了一些问题，请您稍后重试~")
+            else:
+                # 替换Markdown粗体标记和标题标记
+                reply.content = self._replace_markdown(reply.content)
             return reply
         else:
             reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
@@ -331,3 +334,10 @@ class DifyBot(Bot):
             'type': 'message_file',
             'content': event,
         })
+
+    def _replace_markdown(self, text):
+        # 替换Markdown的粗体标记
+        text = text.replace("**", "")
+        # 替换Markdown的标题标记
+        text = text.replace("### ", "").replace("## ", "").replace("# ", "")
+        return text
